@@ -1,0 +1,703 @@
+junoApp.controller("LoginController", function ($scope, $timeout, config, accountService, $interval) {
+
+    $scope.accessToken = "";
+    $scope.redirectUrl = "";
+    $scope.loginCallBack = "";
+    $scope.forgotPhone = "";
+    $scope.phone = "";
+    $scope.socialPhone = "";
+    $scope.allowMigrateHrv = false;
+
+    $scope.needOTP = false;
+    $scope.needLogin = false;
+    $scope.showForgot = false;
+    $scope.needRegister = false;
+    $scope.showSocialOTP = false;
+    $scope.inputForgotByPhone = false;
+    $scope.resendForgotPass = false;
+    $scope.resendForgotPassTimer = 45
+    $scope.timer = null;
+
+    $scope.resendOTP = false;
+    $scope.resendOTPTimer = 45;
+    $scope.timerOTP = null;
+
+    $scope.loginType = 'phone';
+
+    $scope.facebookId = '';
+    $scope.facebookAccessToken = '';
+
+    $scope.gmailId = '';
+    $scope.gmailAccessToken = '';
+
+    $scope.registerRequestId = '';
+
+    $scope.accountInfo = {};
+
+    $scope.showMigrateBlock = false;
+    $scope.migrateInfo = {};
+
+    dataLayer = window.dataLayer || [];
+
+
+    $scope.init = function() {
+        $scope.accessToken = $("#accessToken").val();
+        $scope.redirectUrl = $("#redirectUrl").val();
+        $scope.loginCallBack = $("#loginCallBack").val();
+        $scope.registerRequestId = $("#requestId").val();
+        // accountService.checkToken($scope.accessToken, function (success) {
+        //     if(success) {
+        //         window.location.href = '/authen/account?access_token=' + $scope.accessToken + '&redirect_url=' + $scope.redirectUrl;
+        //     }
+        // })
+
+        var amount = $("#amount").val()
+        if(amount) {
+            var level = accountService.findLevelByAmount(amount);
+            if(level && level.buyOffer > 0) {
+                $("#buyOffer-1").show();
+                $("#buyOffer").text(level.buyOffer + "%");
+            } else {
+                $("#buyOffer-1").hide()
+            }
+        }
+    }
+
+    $scope.sendOTP = function (phone, success, error) {
+        var urlSendOtp = config.OSS_API_HOST + '/auth/send_otp/7';
+        var capcha = '';
+        var email = '';
+
+        $.ajax({
+            url: urlSendOtp,
+            type: "POST",
+            data: {
+                capcha: capcha,
+                phone: phone,
+                email: email,
+                type: $scope.loginType,
+                facebookId: $scope.facebookId,
+                gmailId: $scope.gmailId,
+                allowMigrateHrv: $scope.allowMigrateHrv
+            },
+            error: function (xhr) {
+                $timeout(function() {
+                    if (error != null) {
+                        var data = xhr.responseJSON;
+                        error(xhr.status, data)
+                    }
+                }, 300)
+            }
+        }).done(function (data) {
+            $timeout(function() {
+                if (success != null) {
+                    success(data)
+                }
+            }, 300);
+        });
+    }
+
+    $scope.submitSendOTP = function (phone) {
+        window.parent.postMessage({
+            'func': "clickLoginPhoneCallBack",
+            'message': phone
+        }, "*");
+
+        $scope.checkHRVCustomer(phone, function(data) {
+            $timeout(function () {
+                if(data) {
+                    $scope.showMigrateBlock = true;
+                    $scope.migrateInfo = data;
+                }
+            }, 100)
+        }, function() {
+            $scope.submitSendOTPV2(phone)
+        });
+    }
+
+    $scope.submitSendOTPV2 = function (phone) {
+
+
+
+        $("#phone-input-check").hide();
+        $("#otp-check").hide();
+        $("#otp-check-2").hide();
+        $("#check-phone-2").hide();
+
+        $scope.sendOTP(phone, function (data) {
+
+        }, function (code, data) {
+            switch (code) {
+                case 400:
+                    $("#phone-input-check").show();
+                    window.parent.postMessage({
+                        'func': "viewVerifyPhone",
+                        'message': ""
+                    }, "*");
+                    break;
+                case 404:
+                    $scope.showForgot = false;
+                    $scope.needLogin = false;
+                    $scope.needOTP = true;
+                    $scope.needRegister = true;
+                    $scope.showSocialOTP = false;
+                    window.parent.postMessage({
+                        'func': "viewVerifyPhone",
+                        'message': ""
+                    }, "*");
+                    break;
+                case 406:
+                    $scope.showForgot = false;
+                    $scope.needLogin = false;
+                    $scope.needOTP = true;
+                    $scope.needRegister = false;
+                    $scope.showSocialOTP = false;
+                    window.parent.postMessage({
+                        'func': "viewVerifyPhone",
+                        'message': ""
+                    }, "*");
+                    break;
+                case 409:
+                    $scope.accountInfo = JSON.parse(data.errorMessage);
+                    if ($scope.loginType === 'phone') {
+                        $scope.needLogin = true;
+                        $scope.needOTP = false;
+                        $scope.showForgot = false;
+                        $scope.showSocialOTP = false;
+                        window.parent.postMessage({
+                            'func': "viewLoginThanhVien",
+                            'message': ""
+                        }, "*");
+
+                    } else if ($scope.loginType === 'facebook') {
+
+                    } else {
+
+                    }
+                    break;
+                case 429:
+                    $("#otp-check").show();
+                    $("#otp-check-2").show();
+                    $("#check-phone-2").show();
+                    window.parent.postMessage({
+                        'func': "viewVerifyPhone",
+                        'message': ""
+                    }, "*");
+                    break;
+                default:
+                    $scope.needLogin = false;
+                    $scope.needOTP = false;
+                    $scope.showForgot = false;
+                    $scope.showSocialOTP = false;
+                    break;
+            }
+
+            if($scope.needOTP && code !== 429) {
+                $scope.resendOTP = false;
+                $scope.resendOTPTimer = 45;
+                $scope.timerOTP = $interval(function () {
+                    $scope.resendOTPTimer -= 1;
+                    if($scope.resendOTPTimer === 0) {
+                        $scope.resendOTP = true;
+                        $interval.cancel($scope.timerOTP);
+                    }
+                }, 1000)
+            }
+        })
+    }
+
+    $scope.verifyOTP = function(phone, otp) {
+        $("#check-otp").hide();
+
+        var urlOtp = config.OSS_API_HOST +  '/auth/verify';
+        $.ajax({
+            url : urlOtp,
+            type : "POST",
+            data : {
+                phone: phone,
+                companyId: 7,
+                otp: otp,
+                type: $scope.loginType,
+                facebookId: $scope.facebookId,
+                gmailId: $scope.gmailId
+            },
+            success: function(data){
+                window.parent.postMessage({
+                  'func': "clickVerifyPhoneFinalCallBack",
+                  'message': ""
+                }, "*");
+                if($scope.needRegister) {
+                  window.parent.postMessage({
+                    'func': "viewLoginDangKi",
+                    'message': ""
+                  }, "*");
+                    window.location.href = '/register?login_callback=' + $scope.loginCallBack + '&redirect_url=' + $scope.redirectUrl + '&request_id=' + data.data.requestId + '&allowMigrateHrv=' + $scope.allowMigrateHrv + "&phone=" + phone;
+                } else {
+                    if ($scope.loginType === 'facebook') {
+                        $scope.login('', '', $scope.facebookId, $scope.facebookAccessToken, '', '')
+                    } else if ($scope.loginType === 'google') {
+                        $scope.login('', '', '', '', $scope.gmailId, $scope.gmailAccessToken)
+                    } else {
+
+                    }
+                }
+            },
+            error: function(xhr) {
+                $timeout(function () {
+                    $("#check-otp").show();
+                }, 100)
+            }
+        });
+    }
+    
+    $scope.login = function(phone, password, facebookId, facebookAccessToken, gmailId, gmailAccessToken) {
+        $("#check-password").hide()
+        $("#check-password-2").hide()
+
+        var urlLogin = config.OSS_API_HOST + '/auth/login';
+        $.ajax({
+            url: urlLogin,
+            type: "POST",
+            data: {
+                userName: phone,
+                companyId: 7,
+                password: password,
+                type: $scope.loginType,
+                facebookId: facebookId,
+                facebookAccessToken: facebookAccessToken,
+                gmailId: gmailId,
+                gmailAccessToken: gmailAccessToken,
+                allowMigrateHrv: $scope.allowMigrateHrv
+            },
+            success: function (data) {
+                if($scope.loginCallBack != null && $scope.loginCallBack != '') {
+                    $scope.getMiltiPassUrl(data)
+                }
+            },
+            error: function (xhr) {
+                $timeout(function () {
+                    var code = xhr.status;
+                    if(code === 406) {
+                        if($scope.loginType === 'phone') {
+                            $scope.showForgot = false;
+                            $scope.needLogin = false;
+                            $scope.needOTP = true;
+                            $scope.needRegister = false;
+                            $scope.showSocialOTP = false;
+                          window.parent.postMessage({
+                            'func': "viewVerifyPhone",
+                            'message': ""
+                          }, "*");
+
+
+                        } else {
+                            $scope.showForgot = false;
+                            $scope.needLogin = false;
+                            $scope.needOTP = false;
+                            $scope.needRegister = false;
+                            $scope.showSocialOTP = true;
+                            if($scope.phone) {
+                                $scope.socialPhone = $scope.phone;
+                                $scope.phone = "";
+                            }
+                        }
+                    } else if(code === 400) {
+                        $("#check-password").show();
+                        $("#check-password-2").show()
+                      window.parent.postMessage({
+                        'func': "loginWrongPassword",
+                        'message': ""
+                      }, "*");
+                    } else if(code === 403) {
+
+                    }
+                }, 100);
+            }
+        });
+    }
+
+    $scope.getMiltiPassUrl = function(data) {
+        var redirectUrl = $("#redirectUrl").val();
+        if(redirectUrl.indexOf("?") != -1) {
+            redirectUrl += "&access_token=" + encodeURIComponent(data.data.accessToken)
+        } else {
+            redirectUrl += "?access_token=" + encodeURIComponent(data.data.accessToken)
+        }
+        data.data.redirectUrl = redirectUrl;
+        window.parent.postMessage({
+            'func': $scope.loginCallBack,
+            'message': JSON.stringify(data.data)
+        }, "*");
+
+        // $.ajax({
+        //     url: config.OSS_API_HOST + "/auth/token/get_multipass_url",
+        //     method: "POST",
+        //     data: {
+        //         domain: 'juno-1.myharavan.com',
+        //         redirectUrl: redirectUrl
+        //     },
+        //     beforeSend: function(request) {
+        //         request.setRequestHeader("Authorization", data.data.accessToken);
+        //     }
+        // }).done(function(resp) {
+        //     data.data.redirectUrl = resp
+        //     window.parent.postMessage({
+        //         'func': $scope.loginCallBack,
+        //         'message': JSON.stringify(data.data)
+        //     }, "*");
+        // });
+    }
+    
+    $scope.loginFB = function (member) {
+      if (member === 'member'){
+        window.parent.postMessage({
+          'func': "clickMemberFBCallBack",
+          'message': ""
+        }, "*");
+      } else {
+        window.parent.postMessage({
+          'func': "clickLoginFBCallBack",
+          'message': ""
+        }, "*");
+
+      }
+
+        FB.login(function(response){
+            $scope.loginType = 'facebook';
+            var auth = response.authResponse;
+            var accessToken = auth.accessToken;
+            var userId = auth.userID;
+
+            $scope.facebookId = userId;
+            $scope.facebookAccessToken = accessToken;
+
+            $scope.login('', '', userId, accessToken, '', '');
+        });
+    }
+
+    $scope.loginGmail = function (member) {
+
+
+      if (member === 'member'){
+        window.parent.postMessage({
+          'func': "clickMemberGmailCallBack",
+          'message': ""
+        }, "*");
+      } else {
+        window.parent.postMessage({
+          'func': "clickLoginGmailCallBack",
+          'message': ""
+        }, "*");
+
+      }
+
+        $(".abcRioButtonContentWrapper").click()
+    };
+
+    $scope.forgotPass = function(phone) {
+
+      window.parent.postMessage({
+        'func': "clickRegisterFinalCallBack",
+        'message': ""
+      }, "*");
+
+        $("#check-forgot-phone").hide();
+        $("#check-forgot-phone-1").hide();
+        $("#check-forgot-phone-2").hide();
+        $("#check-forgot-phone-3").hide();
+        $("#check-password").hide()
+        $("#check-password-2").hide()
+        $("#check-email").hide()
+
+        if($scope.accountInfo && $scope.accountInfo.email && !$scope.inputForgotByPhone) {
+            if(!$scope.validateEmail($scope.forgotPhone)) {
+                $("#check-email").show()
+                return
+            }
+        }
+
+        var urlForgot = config.OSS_API_HOST + '/auth/forgot_password';
+        $.ajax({
+            url: urlForgot,
+            type: "POST",
+            data: {
+                phone: phone,
+                companyId: 7,
+                requestId: $scope.accountInfo.extraProps.verify_token
+            },
+            success: function (data) {
+                $timeout(function() {
+                    $("#check-forgot-phone").hide();
+
+                    $scope.resendForgotPass = false
+                    $scope.needLogin = false;
+                    $scope.needOTP = false;
+                    $scope.showForgot = true;
+                    $(".recover-zone-2").show();
+                    $(".recover-zone-1").hide();
+
+                    if($scope.inputForgotByPhone) {
+                        $scope.resendForgotPassTimer = 45
+                        $scope.timer = $interval(function(){
+                            $scope.resendForgotPassTimer -= 1;
+                            if ($scope.resendForgotPassTimer === 0) {
+                                $scope.resendForgotPass = true;
+                                $interval.cancel($scope.timer)
+                            }
+
+                         }, 1000);
+                    }
+                }, 100)
+            },
+            error: function (xhr) {
+                $timeout(function() {
+                    var code = xhr.status;
+                    if(code === 404) {
+                        $("#check-forgot-phone").show();
+                    } else if (code === 406) {
+                        $("#check-forgot-phone-1").show();
+                    } else if (code === 429) {
+                        $("#check-forgot-phone-2").show();
+                        $("#check-forgot-phone-3").show();
+                    }
+
+                }, 100)
+            }
+        });
+    }
+
+    $scope.register = function() {
+
+
+        $('#warning-account').hide();
+        $('#warning-info').hide();
+        $('#warning-verify').hide()
+        $('#warning-password').hide()
+
+        var lastName = $("#lastName").val();
+        var firstName = $("#firstName").val();
+        var phone = $("#phone").val();
+        var email = $("#email").val();
+        var birthDate = $("#birthDate").val();
+        var address = $("#address").val();
+        var pass1 = $("#password").val();
+        var pass2 = $("#confirmPassword").val();
+        var accept = $("#accepts_marketing").prop("checked") === true;
+
+        if (!lastName || !firstName || !pass1 || !pass2){
+            $('#warning-info').show();
+            return;
+        }
+
+        var urlRegister = config.OSS_API_HOST +  '/auth/register';
+        $.ajax({
+            url : urlRegister,
+            type : "POST",
+            data : {
+                lastName: lastName,
+                firstName: firstName,
+                phone: phone,
+                email: email,
+                companyId: 7,
+                address: address,
+                password: pass1,
+                confirmPassword: pass2,
+                birthDate: birthDate,
+                requestId: $scope.registerRequestId,
+                subscribe: accept,
+                allowMigrateHrv: $scope.allowMigrateHrv
+            },
+            success: function(data){
+
+              window.parent.postMessage({
+                'func': 'clickRegisterFinalCallBack',
+                'message': ''
+              }, "*");
+
+                if($scope.loginCallBack != null && $scope.loginCallBack != '') {
+                    // window.parent.postMessage({
+                    //     'func': $scope.loginCallBack,
+                    //     'message': JSON.stringify(data.data)
+                    // }, "*");
+                    $scope.getMiltiPassUrl(data)
+                }
+            },
+            error: function (error) {
+                if (error.status === 409){
+                    $('#warning-account').show();
+                } else if (error.status === 406) {
+                    $('#warning-verify').show()
+                } else if (error.status === 400) {
+                    $('#warning-password').show()
+                }
+            }
+        });
+
+
+    }
+
+    $scope.renderButton = function() {
+        gapi.signin2.render('googleLogin', {
+            'scope': 'profile email',
+            'width': 240,
+            'height': 50,
+            'longtitle': true,
+            'theme': 'dark',
+            'onsuccess': function (googleUser) {
+                // Useful data for your client-side scripts:
+                var profile = googleUser.getBasicProfile();
+                console.log("ID: " + profile.getId()); // Don't send this directly to your server!
+                console.log('Full Name: ' + profile.getName());
+                console.log('Given Name: ' + profile.getGivenName());
+                console.log('Family Name: ' + profile.getFamilyName());
+                console.log("Image URL: " + profile.getImageUrl());
+                console.log("Email: " + profile.getEmail());
+
+                // The ID token you need to pass to your backend:
+                var id_token = googleUser.getAuthResponse().id_token;
+                console.log("ID Token: " + id_token);
+
+                $scope.loginType = 'google'
+                $scope.gmailId = profile.getId();
+                $scope.gmailAccessToken = id_token;
+
+                var auth2 = gapi.auth2.getAuthInstance();
+                auth2.disconnect();
+
+                $scope.login('', '', '', '', profile.getId(), id_token)
+            },
+            'onfailure': function (error) {
+                alert(error)
+            }
+        });
+    }
+
+    $scope.googleLoginSuccess = function (googleUser) {
+        // Useful data for your client-side scripts:
+        var profile = googleUser.getBasicProfile();
+        console.log("ID: " + profile.getId()); // Don't send this directly to your server!
+        console.log('Full Name: ' + profile.getName());
+        console.log('Given Name: ' + profile.getGivenName());
+        console.log('Family Name: ' + profile.getFamilyName());
+        console.log("Image URL: " + profile.getImageUrl());
+        console.log("Email: " + profile.getEmail());
+
+        // The ID token you need to pass to your backend:
+        var id_token = googleUser.getAuthResponse().id_token;
+        console.log("ID Token: " + id_token);
+
+        $scope.loginType = 'google'
+        $scope.gmailId = profile.getId();
+        $scope.gmailAccessToken = id_token;
+
+        var auth2 = gapi.auth2.getAuthInstance();
+        auth2.disconnect();
+
+        $scope.login('', '', '', '', profile.getId(), id_token)
+    }
+
+    $scope.sendForgotBySMS = function() {
+        $scope.inputForgotByPhone = true;
+        // $scope.showForgot = true;
+        // $scope.forgotPhone = ""
+        // $(".recover-zone-2").hide();
+        // $(".recover-zone-1").show();
+        if($scope.phone) {
+            $scope.forgotPhone = $scope.phone;
+            $scope.inputForgotByPhone = true;
+            $scope.forgotPass($scope.phone);
+        }
+    }
+
+    $scope.backClick = function() {
+        $scope.showForgot = false;
+        $scope.needLogin = false;
+        $scope.needOTP = false;
+        $scope.showSocialOTP = false;
+        $scope.inputForgotByPhone = false
+        $scope.forgotPhone = ""
+        if($scope.timer) {
+            $interval.cancel($scope.timer);
+        }
+        if($scope.timerOTP) {
+            $interval.cancel($scope.timerOTP);
+        }
+        $(".recover-zone-2").hide();
+        $(".recover-zone-1").show();
+        $('#des-forgot-phone').show();
+    }
+    $scope.changeForgotByPhone = function() {
+        // $('#des-forgot-phone').hide();
+        if($scope.phone) {
+            $scope.forgotPhone = $scope.phone;
+            $scope.inputForgotByPhone = true;
+            $scope.forgotPass($scope.phone);
+        }
+    }
+
+    $scope.validateEmail = function (email) {
+        const re = /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+        return re.test(String(email).toLowerCase());
+    }
+
+    $scope.skipInputPhone = function() {
+        window.parent.postMessage({
+            'func': 'clickForgotPasswordCallBack',
+            'message': ''
+        }, "*");
+        if(!$scope.accountInfo || !$scope.accountInfo.email) {
+            $scope.changeForgotByPhone();
+        }
+    }
+
+    $scope.checkHRVCustomer = function (phone, success, errorCB) {
+        $.ajax({
+            url: config.OSS_API_HOST + "/auth/check_hrv_customer",
+            type: "GET",
+            data: {
+                phone: phone,
+                companyId: 7
+            },
+            error: function (xhr) {
+                errorCB();
+            }
+        }).done(function (data) {
+            if(data) {
+                success(data)
+            } else {
+                errorCB();
+            }
+        });
+    }
+    
+    $scope.buildMigrateConfirm = function (callback) {
+        swal("Bạn đã từng login trước đây. Bạn muốn giữ lại thông tin tài khoản ", {
+            buttons: {
+                cancel: true,
+                ok: true,
+            },
+        }).then((value) => {
+            switch (value) {
+                case "ok":
+                    callback(true)
+                    break;
+                default:
+                    callback(false)
+                    break;
+            }
+        });
+    }
+    
+    $scope.confirmMigrate = function (phone) {
+        $scope.showMigrateBlock = false;
+        $scope.allowMigrateHrv = true;
+        $scope.submitSendOTPV2(phone)
+    }
+
+    $scope.cancelMigrate = function (phone) {
+        $scope.showMigrateBlock = false;
+        $scope.allowMigrateHrv = false;
+        $scope.submitSendOTPV2(phone)
+    }
+
+});

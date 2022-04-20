@@ -1,0 +1,18 @@
+var rootApp = angular.module('rootApp', ['JunoApp','JunoApp1'])
+rootApp.config(function($interpolateProvider) {
+    $interpolateProvider.startSymbol('[[');
+    $interpolateProvider.endSymbol(']]');
+  });
+
+
+var junoApp = angular.module("JunoApp", [])
+junoApp.config(function($interpolateProvider) {
+    $interpolateProvider.startSymbol('[[');
+    $interpolateProvider.endSymbol(']]');
+});
+
+var junoApp1 = angular.module("JunoApp1", [])
+junoApp1.config(function($interpolateProvider) {
+    $interpolateProvider.startSymbol('[[');
+    $interpolateProvider.endSymbol(']]');
+});
